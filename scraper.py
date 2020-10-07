@@ -18,15 +18,18 @@ def scrape_talk_urls(conference_url):
     Per session of conference there are generally 5-8 talks given and 
     around 5 sessions per conference
     """
+
     soup = get_soup(conference_url)
 
     div = soup.find("div", {"class": "section-wrapper lumen-layout lumen-layout--landing-3"})
     sessions = div.findChildren("div", recursive=False)
 
-    return ["https://www.lds.org" + a["href"]
+    all_links = ["https://www.churchofjesuschrist.org" + a["href"]
             for session in sessions
             for a in session.find_all("a", href=True)
-            if re.search("^/general-conference/\d{4}/(04|10)/.*[?]lang=eng", a["href"])]
+            if re.search("^/study/general-conference/\d{4}/(04|10)/.*[?]lang=eng", a["href"])]
+
+    return all_links
 
 def scrape_talk_data(url):
     """scrapes a single talk for data such as: 
@@ -43,18 +46,46 @@ def scrape_talk_data(url):
     try:
         soup = get_soup(url)
 
-        title = soup.find("div", {"class": "title-block"}).find("h1", {"class": "title"}).text
-        conference = soup.find("a", {"class": "sticky-banner__link"}).text
-        calling = soup.find("p", {"class": "article-author__title"}).text
+        title = soup.find("a", {"class": "toTopLink-2Chef"}).find("div").text
+
+        conference = soup.find("div", {"class": "itemTitle-23vMm"}).find("p").text
+
+
+        calling_div = soup.find("p", {"class": "author-role"})
+
+        if calling_div == None:
+            calling_div = soup.find("div", {"class": "byline"}).find_all("p")
+            if len(calling_div) < 2:
+                calling = " "
+            else:
+                calling = calling_div[1].text
+        else:
+            calling = calling_div.text
 
         # older talks don't have the same exact structure
-        speaker_div = soup.find("a", {"class": "article-author__name"})
+        speaker_div = soup.find("p", {"class": "author-name"})
+
         if speaker_div == None:
-            speaker = soup.find("div", {"class": "article-author"}).text
+            speaker = soup.find("div", {"class": "byline"}).find("p").text
         else:
             speaker = speaker_div.text
 
-        content = soup.find("div", {"class": "article-content"}).text
+        content_array = soup.find("div", {"class": "body-block"}).find_all("p")
+        content = ""
+
+        for paragraph in content_array:
+            content = content + paragraph.text + "\n\n"
+
+        all_foot_notes = soup.find_all("p")
+        footnotes = 'FOOTNOTES:\n'
+
+        index = 1
+        for note in all_foot_notes:
+            if note.get("id") is not None:
+                if "note" in note.get("id"):
+                    footnotes = footnotes + str(index) + ". " + note.text + "\n"
+                    index = index + 1
+
 
         return {
             "title": title,
@@ -63,6 +94,7 @@ def scrape_talk_data(url):
             "conference": conference,
             "url": url,
             "talk": content,
+            "footnotes": footnotes
         }
     except Exception as e:
         print(f"\n\n\nURL: {url} FAILED")
@@ -73,14 +105,15 @@ def scrape_talk_data(url):
 # create all permutations of urls from 1971-2018
 #   landing pages for a bi-annual session of conference always follow the same structure:
 #   https://www.lds.org/general-conference/<year>/<month>?lang=eng
-urls = [f"https://www.lds.org/general-conference/{year}/{month}?lang=eng"
-        for year in range(1971, 2019)
+urls = [f"https://www.churchofjesuschrist.org/general-conference/{year}/{month}?lang=eng"
+        for year in range(1971, 2020)
         for month in ["04", "10"]]
 
 start = time.time()
 
 # create a list of all the urls for every talk 
 all_urls = [scrape_talk_urls(url) for url in urls]
+
 all_urls = list(itertools.chain(*all_urls)) # flatten into single list from a list of lists
 print(len(all_urls))  # validate total number of urls
 
@@ -91,11 +124,14 @@ for i, url in enumerate(all_urls):
 
 conference_df = pd.DataFrame(conference_talks)
 
+
+
 # simple cleaning
 for col in conference_df.columns:
-    conference_df[col] = conference_df[col].apply(lambda x: unicodedata.normalize("NFKD", x) if pd.notnull(x) else x)
-    conference_df[col] = conference_df[col].apply(lambda x: x.replace("\n", "") if pd.notnull(x) else x)
+    conference_df[col] = conference_df[col].apply(lambda x: unicodedata.normalize("NFD", x) if pd.notnull(x) else x)
+    # conference_df[col] = conference_df[col].apply(lambda x: x.replace("\n", "") if pd.notnull(x) else x)
     conference_df[col] = conference_df[col].apply(lambda x: x.replace("\t", "") if pd.notnull(x) else x)
+    print(conference_df[col])
 
 print(conference_df)
 # finish
